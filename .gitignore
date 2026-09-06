@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# 環境変数（認証情報はコミットしない）
+.env
+.env.local
+*.local
+
+# ログ
+*.log

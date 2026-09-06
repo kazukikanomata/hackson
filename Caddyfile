@@ -1,0 +1,11 @@
+{$SITE_ADDRESS:localhost} {
+    # api配下はバックエンドへ転送
+    handle /api/* {
+        reverse_proxy {$BACKEND_UPSTREAM:localhost:8080}
+    }
+
+    # そのほかはフロントエンドへ転送する
+    handle {
+        reverse_proxy {$FRONTEND_UPSTREAM:localhost:3000}
+    }
+}

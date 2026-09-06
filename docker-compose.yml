@@ -1,0 +1,81 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: local-caddy
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    environment:
+      # コンテナ内では localhost ではなくサービス名で名前解決する
+      SITE_ADDRESS: ":80"
+      BACKEND_UPSTREAM: "backend:80"
+      FRONTEND_UPSTREAM: "frontend:80"
+    healthcheck:
+      # Caddy 自身の管理APIを叩いて「プロキシが生きているか」を見る
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  frontend:
+    image: nginx:alpine
+    container_name: LF
+    command: >
+      /bin/sh -c "echo '<h1>Frontend Ready!</h1>' > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - app-net
+
+  backend:
+    image: nginx:alpine
+    container_name: LB
+    command: >
+      /bin/sh -c "mkdir -p /usr/share/nginx/html/api && echo '{\"status\":\"ok\",\"message\":\"Backend API Ready!\"}' > /usr/share/nginx/html/api/health && exec nginx -g 'daemon off;'"
+    healthcheck:
+      # アプリ側のヘルスエンドポイントを叩く
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  db:
+    image: postgres:16-alpine
+    container_name: local-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: hackathon_db
+    ports:
+      - "5432:5432" # ローカルのGUIツール（TablePlus等）から確認用
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d hackathon_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
