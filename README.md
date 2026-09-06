@@ -16,6 +16,9 @@
 事前に **Go / Docker Desktop / nvm** をインストールしてください。
 
 ```bash
+# 環境変数の準備（初回のみ）
+cp .env.example .env       # 必要なら値を編集
+
 # フロントエンドの準備（初回のみ）
 cd frontend
 nvm install && nvm use     # .nvmrc のバージョンに合わせる
@@ -45,4 +48,6 @@ cd frontend && pnpm dev        # 3. フロントエンド
 ## 注意
 
 - パッケージマネージャは **pnpm** です。npm / yarn は使わないでください。
+- DBの認証情報は `.env` に置きます（git管理外）。**実際の値をコミットしないでください。**
+  項目を増やしたら `.env.example` にも追記してください。
 - API のパスは必ず `/api/` から始めてください（プロキシの振り分け条件）。

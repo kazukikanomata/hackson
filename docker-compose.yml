@@ -62,13 +62,16 @@ services:
     image: postgres:16-alpine
     container_name: local-db
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: hackathon_db
+      # 値は .env から読み込む（.env は git 管理外）
+      # 未設定ならエラーで停止する
+      POSTGRES_USER: ${POSTGRES_USER:?.env に POSTGRES_USER を設定してください}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env に POSTGRES_PASSWORD を設定してください}
+      POSTGRES_DB: ${POSTGRES_DB:?.env に POSTGRES_DB を設定してください}
     ports:
       - "5432:5432" # ローカルのGUIツール（TablePlus等）から確認用
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d hackathon_db"]
+      # $$ はコンテナ内のシェルに展開させるためのエスケープ（compose側では置換しない）
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 3s
       timeout: 3s
       retries: 5

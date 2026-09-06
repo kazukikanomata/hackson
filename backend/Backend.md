@@ -117,3 +117,56 @@ healthcheck:
 Caddy が起動しません。**認証を挟んだり重い処理を入れたりしないでください。**
 
 DBとの接続確認まで含めたい場合は `db.PingContext()` の結果を返す形に拡張します。
+
+---
+
+## DB接続（今後）
+
+接続情報はリポジトリルートの `.env` で管理しています（**git管理外**）。
+
+| 変数 | 用途 |
+| --- | --- |
+| `POSTGRES_USER` | DBユーザ名 |
+| `POSTGRES_PASSWORD` | DBパスワード |
+| `POSTGRES_DB` | DB名 |
+
+| 項目 | 値 |
+| --- | --- |
+| ホスト | `localhost`（ネイティブ実行） / `db`（コンテナ内） |
+| ポート | 5432 |
+
+### Goから読む場合
+
+**ソースに直書きせず、必ず環境変数から読んでください。**
+
+```go
+dsn := fmt.Sprintf(
+	"postgres://%s:%s@%s:5432/%s?sslmode=disable",
+	os.Getenv("POSTGRES_USER"),
+	os.Getenv("POSTGRES_PASSWORD"),
+	os.Getenv("DB_HOST"),
+	os.Getenv("POSTGRES_DB"),
+)
+```
+
+ネイティブ実行時は `.env` が自動で読まれないため、以下のいずれかで渡します。
+
+```bash
+# 方法1: その場で読み込む
+set -a && source ../.env && set +a && go run main.go
+
+# 方法2: godotenv を使う
+go get github.com/joho/godotenv
+```
+
+ドライバは `pgx` が標準的です（`go get github.com/jackc/pgx/v5`）。
+
+---
+
+## 注意点
+
+- compose の `backend` サービスはまだ **nginx のダミー**です。
+  実物に差し替える際は Dockerfile が必要になります。
+- Go を `scratch` / `distroless` でビルドするとシェルが無いため、
+  `CMD-SHELL` 形式のヘルスチェックが使えません。`alpine` ベースにするか、
+  ヘルスチェック用の小さなバイナリを同梱してください。

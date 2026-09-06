@@ -31,14 +31,36 @@ corepack enable pnpm
 
 `package.json` の `packageManager` で `pnpm@10.33.0` に固定しています。**npm / yarn は使わないでください**（lockfile が壊れます）。
 
-## 2. フロントエンドの依存インストール
+## 2. 環境変数の準備
+
+DBの認証情報は `.env` から読み込みます。**`.env` は git 管理外**なので、
+clone 後に雛形からコピーしてください。
+
+```bash
+cp .env.example .env
+```
+
+| 変数 | 用途 |
+| --- | --- |
+| `POSTGRES_USER` | DBユーザ名 |
+| `POSTGRES_PASSWORD` | DBパスワード |
+| `POSTGRES_DB` | DB名 |
+
+`.env` が無い、または値が空のまま `docker compose up` すると、
+`required variable POSTGRES_USER is missing a value` というエラーで停止します
+（黙って起動して後で困らないよう、意図的にそうしています）。
+
+> 項目を追加したら **`.env.example` にもキーだけ追記**してください。
+> そうしないと他のメンバーが何を設定すべきか分かりません。
+
+## 3. フロントエンドの依存インストール
 
 ```bash
 cd frontend
 pnpm install
 ```
 
-## 3. 起動
+## 4. 起動
 
 ### 普段の開発（推奨）
 
@@ -103,7 +125,7 @@ curl -k -o /dev/null -w "%{http_code}\n" https://localhost/   # => 200
 
 ---
 
-## 4. フロントエンドの使い方
+## 5. フロントエンドの使い方
 
 ### コマンド
 
@@ -165,7 +187,7 @@ lsof -nP -iTCP:443 -sTCP:LISTEN    # 残っていれば kill <PID>
 
 ---
 
-## 5. Docker Compose（ヘルスチェック）
+## 6. Docker Compose（ヘルスチェック）
 
 ### 起動と状態確認
 
@@ -220,7 +242,7 @@ docker compose down -v       # DBのデータも消す
 
 ---
 
-## 6. Caddyfile について
+## 7. Caddyfile について
 
 ネイティブ起動とDocker起動の両方で同じ `Caddyfile` を使えるよう、環境変数で上書きできるようにしています。
 
