@@ -1,35 +1,78 @@
 # セットアップ手順
 
+初めての人は [README.md](README.md) のクイックスタートから読んでください。
+このファイルは詳細な手順と、構成の背景を説明します。
+
 ## 構成
 
-| レイヤ | 技術 | ポート |
-| --- | --- | --- |
-| リバースプロキシ | Caddy | 443 / 80 |
-| フロントエンド | Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui | 3000 |
-| バックエンド | Go (net/http) | 8080 |
+| レイヤ | 技術 | ポート | 普段の起動方法 |
+| --- | --- | --- | --- |
+| フロントエンド | Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui | 3000 | ネイティブ（`pnpm dev`） |
+| バックエンド | Go (`net/http`) + air | 8080 | Docker |
+| DB | PostgreSQL 16 | 5432 | Docker |
+| リバースプロキシ | Caddy | 80 / 443 | 普段は使わない |
 
-Caddy が `https://localhost` で受けて、`/api/*` を Go(8080)、それ以外を Vite(3000) に転送します。
+普段の開発では **Caddy は不要**です。Vite の devProxy が `/api/*` を Go(8080) に
+転送するため、`http://localhost:3000` だけで完結します。
+Caddy は本番に近い構成を確認したいときだけ使います。
 
 ---
 
 ## 1. 必要なツール
 
+| ツール | 用途 | 必須か |
+| --- | --- | --- |
+| Docker Desktop | DB とバックエンドの起動 | **必須** |
+| nvm | Node のバージョン管理 | **必須** |
+| Go | バックエンドをネイティブで動かす場合のみ | 任意 |
+| Caddy | 構成全体を確認する場合のみ | 任意 |
+
 ```bash
-# Caddy（軽量な方を入れる）
-brew install caddy
+# 必須
+brew install --cask docker
+brew install nvm
 
-# Go
+# 任意
 brew install go
-
-# Node.js（.nvmrc のバージョンを使う）
-brew install nvm     # 未導入の場合
-cd frontend && nvm install && nvm use
-
-# pnpm（このプロジェクトのパッケージマネージャ）
-corepack enable pnpm
+brew install caddy
 ```
 
-`package.json` の `packageManager` で `pnpm@10.33.0` に固定しています。**npm / yarn は使わないでください**（lockfile が壊れます）。
+バックエンドを Docker で動かす場合、**Go のインストールは不要**です。
+コンテナ内の Go がビルドします。
+
+### Node のバージョン
+
+`frontend/.nvmrc` で固定しています。
+
+```bash
+cd frontend
+nvm install && nvm use     # .nvmrc の版を入れて切り替え
+corepack enable pnpm       # pnpm を有効化
+```
+
+`package.json` の `packageManager` で `pnpm@10.33.0` に固定しています。
+**npm / yarn は使わないでください**（lockfile が壊れます）。
+
+### Go のバージョン
+
+`backend/go.mod` の `toolchain` で固定しています。**nvm のような別ツールは不要**です。
+
+```
+go 1.24.3          ← 必要な最低バージョン
+toolchain go1.26.8 ← 実際に使うバージョン
+```
+
+Go 1.21 以降は `GOTOOLCHAIN=auto`（既定値）が有効で、手元の Go が古ければ
+**`toolchain` に書かれた版を自動でダウンロードして使います**。
+つまり Go さえ入っていれば、バージョンを手動で合わせる必要はありません。
+
+```bash
+cd backend && go version    # => go version go1.26.8 ...
+```
+
+> 手元の Go の方が新しい場合はダウングレードせず、そのまま新しい方が使われます。
+
+---
 
 ## 2. 環境変数の準備
 
@@ -53,6 +96,8 @@ cp .env.example .env
 > 項目を追加したら **`.env.example` にもキーだけ追記**してください。
 > そうしないと他のメンバーが何を設定すべきか分かりません。
 
+---
+
 ## 3. フロントエンドの依存インストール
 
 ```bash
@@ -60,37 +105,63 @@ cd frontend
 pnpm install
 ```
 
+---
+
 ## 4. 起動
 
-### 普段の開発（推奨）
+### パターンA: 普段の開発（推奨）
 
-**DBだけDocker、アプリはネイティブ**。Caddyは不要です。
+**DB とバックエンドを Docker、フロントエンドをネイティブ**で動かします。
 
 ```bash
-# 1. DBを起動（バックグラウンド、1回でOK）
-docker compose up -d db
+# 1. DB + バックエンド（コード変更は自動反映される）
+docker compose up -d db backend
 
-# 2枚目のターミナル: バックエンド
-cd backend && go run main.go
-
-# 3枚目のターミナル: フロントエンド
+# 2枚目のターミナル: フロントエンド
 cd frontend && pnpm dev
 ```
 
 ブラウザで **http://localhost:3000** を開く。
+「Call Go API」ボタンで `Hello, Go API!!` が表示されれば疎通OK。
 
-`/api/*` は Vite の devProxy が Go(8080) に転送するので、Caddy を起動しなくても
-API が叩けます。フロントだけ触る日は `pnpm dev` だけでも構いません
-（API呼び出しは失敗しますが画面は出ます）。
+バックエンドは `air` がホストの `backend/` を監視しているので、
+**`.go` を保存すると約1秒で自動的に再ビルド・再起動されます**。
+ビルドエラーはログに出ます。
 
-DBを止めるときは `docker compose down`（データも消すなら `-v`）。
+```bash
+docker compose logs -f backend
+```
 
-### 構成全体の確認（Caddy込み）
+> 初回だけ `air` の取得に1〜2分かかります。2回目以降はキャッシュが効いて
+> 10秒程度で起動します。
+
+フロントだけ触る日は `pnpm dev` のみでも構いません（API呼び出しは失敗しますが画面は出ます）。
+
+### パターンB: バックエンドもネイティブ
+
+Go のデバッガを使いたい場合など。
+
+```bash
+docker compose up -d db          # DBのみ
+
+go install github.com/air-verse/air@latest   # 初回のみ
+cd backend && air                            # 自動リロードあり
+# または
+cd backend && go run main.go                 # 自動リロードなし
+```
+
+> `air` は `$(go env GOPATH)/bin` に入ります。PATH が通っていない場合は
+> シェルの設定に追記してください。
+> ```bash
+> export PATH="$PATH:$(go env GOPATH)/bin"
+> ```
+
+### パターンC: 構成全体の確認（Caddy込み）
 
 Caddyfile やプロキシ設定を変更した後の検証用です。
 
 ```bash
-docker compose up -d      # 全サービス（frontend/backendはnginxダミー）
+docker compose up -d      # 全サービス
 ```
 
 **http://localhost** で確認。終わったら `docker compose down`。
@@ -98,116 +169,38 @@ docker compose up -d      # 全サービス（frontend/backendはnginxダミー�
 > ネイティブのCaddyとDockerのCaddyは同じ80番を使うため**同時に起動できません**。
 > 切り替える際は `caddy stop` / `docker compose down` で必ず片方を止めてください。
 
-### ネイティブのみ（ターミナル3枚）
+### 停止
 
 ```bash
-# 1枚目: バックエンド
-cd backend && go run main.go
-
-# 2枚目: フロントエンド
-cd frontend && pnpm dev
-
-# 3枚目: リバースプロキシ（リポジトリルートで）
-caddy run --config Caddyfile
+docker compose down          # コンテナ削除（DBのデータも消えます）
+docker compose stop          # 停止のみ（データは残る）
 ```
 
-ブラウザで **https://localhost** を開く。
-「Call Go API」ボタンを押して `Hello, Go API!!` が表示されれば全レイヤの疎通OK。
-
-> 初回は Caddy のローカル認証局を信頼させるため、管理者パスワードを求められます。
-
-### 動作確認（CLI）
-
-```bash
-curl -k https://localhost/api/hello   # => {"message": "Hello, Go API!!"}
-curl -k -o /dev/null -w "%{http_code}\n" https://localhost/   # => 200
-```
+> compose に volume を定義していないため、`down` すると**DBのデータは消えます**。
+> 永続化が必要になったら `db` サービスに volume を追加してください。
 
 ---
 
-## 5. フロントエンドの使い方
+## 5. Docker Compose とヘルスチェック
 
-### コマンド
+### 起動順の制御
 
-```bash
-pnpm dev       # 開発サーバ (localhost:3000)
-pnpm build     # 型チェック + 本番ビルド → dist/
-pnpm lint      # oxlint
-pnpm preview   # ビルド結果をローカル確認
-```
-
-### shadcn/ui のコンポーネント追加
-
-必要になったものだけ都度追加してください。
+`depends_on` に `condition: service_healthy` を付けているので、
+**db が healthy になってから backend、両方が healthy になってから caddy** の順で起動します。
+「DBはまだ起動中なのにアプリが繋ぎにいって落ちる」という事故が防げます。
 
 ```bash
-cd frontend
-pnpm dlx shadcn@latest add card input dialog
-```
-
-追加されたコンポーネントは `src/components/ui/` に**ソースとして**置かれるので、自由に編集できます。
-
-### import エイリアス
-
-`@/` が `src/` を指します。
-
-```ts
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-```
-
-### ディレクトリ
-
-```
-frontend/
-├── .nvmrc                  # Node バージョン固定
-├── components.json         # shadcn/ui 設定
-├── vite.config.ts          # Tailwind プラグイン / @ エイリアス / port 3000
-└── src/
-    ├── index.css           # Tailwind + shadcn テーマ変数
-    ├── App.tsx             # Go API 疎通サンプル
-    ├── components/ui/      # shadcn/ui コンポーネント
-    └── lib/utils.ts        # cn()
-```
-
----
-
-## トラブルシューティング
-
-**`https://localhost` が意図しない内容を返す**
-過去に `caddy start` したプロセスが残って 443 を掴んでいる可能性があります。
-
-```bash
-caddy stop
-lsof -nP -iTCP:443 -sTCP:LISTEN    # 残っていれば kill <PID>
-```
-
-**ポート3000が埋まっている**
-`vite.config.ts` の `server.port` と `Caddyfile` の転送先を揃えて変更してください。
-
----
-
-## 6. Docker Compose（ヘルスチェック）
-
-### 起動と状態確認
-
-```bash
-docker compose up -d
 docker compose ps          # STATUS 列が (healthy) になればOK
 ```
 
-`depends_on` に `condition: service_healthy` を付けているので、
-**db → backend → frontend/backend → caddy** の順で「前段が healthy になってから」次が起動します。
-「DBはまだ起動中なのにアプリが繋ぎにいって落ちる」という事故が防げます。
+### 各サービスのチェック内容
 
-### ヘルスチェックの中身
-
-| サービス | チェック方法 |
-| --- | --- |
-| db | `pg_isready` （Postgresが接続受付可能か） |
-| backend | `wget --spider http://localhost/api/health` |
-| frontend | `wget --spider http://localhost/` |
-| caddy | `wget --spider http://localhost:2019/config/` （Caddyの管理API） |
+| サービス | 中身 | チェック方法 |
+| --- | --- | --- |
+| db | PostgreSQL 16 | `pg_isready` |
+| backend | Go + air（ホストの `backend/` をマウント） | `wget --spider http://localhost:8080/api/health` |
+| frontend | **nginx のダミー** | `wget --spider http://localhost/` |
+| caddy | Caddy | `wget --spider http://localhost:2019/config/`（管理API） |
 
 パラメータの意味:
 
@@ -226,23 +219,23 @@ docker inspect --format '{{.State.Health.Status}} / {{.State.Health.FailingStrea
 docker inspect --format '{{json .State.Health.Log}}' LB | jq
 ```
 
-### 疎通確認
+### backend コンテナの仕組み
 
-```bash
-curl http://localhost/              # => <h1>Frontend Ready!</h1>
-curl http://localhost/api/health    # => {"status":"ok", ...}
+イメージ再ビルドなしでコード変更が反映されるのは、ホストのソースを
+バインドマウントしているためです。
+
+```yaml
+volumes:
+  - ./backend:/app                        # ホストのソースを直接参照
+  - go-path:/go                           # 依存と air をキャッシュ
+  - go-build-cache:/root/.cache/go-build  # ビルドキャッシュ
 ```
 
-### 停止
-
-```bash
-docker compose down          # コンテナ削除
-docker compose down -v       # DBのデータも消す
-```
+`go-path` と `go-build-cache` が無いと毎回フルビルドになり、起動が非常に遅くなります。
 
 ---
 
-## 7. Caddyfile について
+## 6. Caddyfile について
 
 ネイティブ起動とDocker起動の両方で同じ `Caddyfile` を使えるよう、環境変数で上書きできるようにしています。
 
@@ -256,7 +249,7 @@ docker compose down -v       # DBのデータも消す
 | | SITE_ADDRESS | BACKEND_UPSTREAM | FRONTEND_UPSTREAM |
 | --- | --- | --- | --- |
 | ネイティブ（デフォルト） | `localhost` | `localhost:8080` | `localhost:3000` |
-| Docker（compose で上書き） | `:80` | `backend:80` | `frontend:80` |
+| Docker（compose で上書き） | `:80` | `backend:8080` | `frontend:80` |
 
 **なぜ必要か**: コンテナ内の `localhost` はそのコンテナ自身を指すため、Docker では
 `localhost:8080` ではなくサービス名 `backend` で名前解決する必要があります。
@@ -265,10 +258,45 @@ composeでは80番しか公開していないため `:80` を指定していま�
 
 ---
 
+## トラブルシューティング
+
+**ポート3000が埋まっていて `pnpm dev` が起動しない**
+
+`strictPort: true` を設定しているため、別ポートにずれずエラーで停止します。
+先客を止めてください。
+
+```bash
+lsof -ti TCP:3000 -sTCP:LISTEN | xargs kill
+```
+
+**`http://localhost` が意図しない内容を返す**
+
+過去に起動した Caddy が残って 80/443 を掴んでいる可能性があります。
+
+```bash
+caddy stop
+docker compose down
+lsof -nP -iTCP:80,443 -sTCP:LISTEN    # 残っていれば kill <PID>
+```
+
+**Goのコードを変えたのに反映されない**
+
+`go run main.go` で起動している場合、自動反映されません（起動時に1回コンパイルするだけ）。
+`Ctrl+C` で止めて再実行するか、`air` を使ってください。
+
+**backend コンテナが unhealthy から戻らない**
+
+ビルドエラーの可能性が高いです。ログを確認してください。
+
+```bash
+docker compose logs backend
+```
+
+---
+
 ## 補足 / TODO
 
-- compose の frontend / backend はまだ **nginx のダミー**です。
-  実際の Go / Vite に差し替える際は Dockerfile を用意してください。
-  Go を `scratch` や `distroless` でビルドするとシェルが無く `CMD-SHELL` 形式の
-  ヘルスチェックが使えないので、`alpine` ベースにするか、ヘルスチェック用の
-  小さなGoバイナリを同梱する必要があります。
+- compose の `frontend` サービスはまだ **nginx のダミー**です（`backend` は実物に差し替え済み）。
+  フロントもDocker化する場合は、`backend` と同様にバインドマウント + `pnpm dev --host` の構成にします。
+- compose に volume が無いため、`docker compose down` でDBのデータが消えます。
+- OpenAPI からの型自動生成（`oapi-codegen` + `openapi-typescript`）は未着手です。

@@ -9,7 +9,7 @@ services:
     environment:
       # コンテナ内では localhost ではなくサービス名で名前解決する
       SITE_ADDRESS: ":80"
-      BACKEND_UPSTREAM: "backend:80"
+      BACKEND_UPSTREAM: "backend:8080"
       FRONTEND_UPSTREAM: "frontend:80"
     healthcheck:
       # Caddy 自身の管理APIを叩いて「プロキシが生きているか」を見る
@@ -41,17 +41,34 @@ services:
       - app-net
 
   backend:
-    image: nginx:alpine
+    image: golang:1.26-alpine
     container_name: LB
+    working_dir: /app
+    volumes:
+      # ホストの backend/ をそのまま参照する。
+      # これによりコード変更が即コンテナに反映され、イメージ再ビルドが不要になる。
+      - ./backend:/app
+      # 依存とビルドキャッシュを保持（毎回のフルビルドを避ける）
+      - go-path:/go
+      - go-build-cache:/root/.cache/go-build
+    # air がファイル保存を検知して自動で再ビルド・再起動する
     command: >
-      /bin/sh -c "mkdir -p /usr/share/nginx/html/api && echo '{\"status\":\"ok\",\"message\":\"Backend API Ready!\"}' > /usr/share/nginx/html/api/health && exec nginx -g 'daemon off;'"
+      sh -c "command -v air >/dev/null || go install github.com/air-verse/air@latest; exec air"
+    environment:
+      DB_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER:?.env に POSTGRES_USER を設定してください}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env に POSTGRES_PASSWORD を設定してください}
+      POSTGRES_DB: ${POSTGRES_DB:?.env に POSTGRES_DB を設定してください}
+    ports:
+      # ホストから直接叩けるようにする（フロントをネイティブで動かす場合に必要）
+      - "8080:8080"
     healthcheck:
-      # アプリ側のヘルスエンドポイントを叩く
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      # 初回は air のインストールとビルドが走るため長めに取る
+      start_period: 120s
     depends_on:
       db:
         condition: service_healthy
@@ -62,15 +79,12 @@ services:
     image: postgres:16-alpine
     container_name: local-db
     environment:
-      # 値は .env から読み込む（.env は git 管理外）
-      # 未設定ならエラーで停止する
       POSTGRES_USER: ${POSTGRES_USER:?.env に POSTGRES_USER を設定してください}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env に POSTGRES_PASSWORD を設定してください}
       POSTGRES_DB: ${POSTGRES_DB:?.env に POSTGRES_DB を設定してください}
     ports:
-      - "5432:5432" # ローカルのGUIツール（TablePlus等）から確認用
+      - "5432:5432"
     healthcheck:
-      # $$ はコンテナ内のシェルに展開させるためのエスケープ（compose側では置換しない）
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 3s
       timeout: 3s
@@ -78,6 +92,10 @@ services:
       start_period: 10s
     networks:
       - app-net
+
+volumes:
+  go-path:
+  go-build-cache:
 
 networks:
   app-net:

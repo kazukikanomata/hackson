@@ -11,8 +11,8 @@
 | パッケージマネージャ | pnpm 10                                    |
 | 開発ポート           | 3000                                       |
 
-`/api/*` へのリクエストは Caddy が Go(8080) に転送するため、フロントからは
-`fetch('/api/hello')` のように相対パスで叩けます（CORS設定は不要）。
+`/api/*` へのリクエストは `vite.config.ts` の devProxy が Go(8080) に転送するため、
+フロントからは `fetch('/api/hello')` のように相対パスで叩けます（CORS設定は不要）。
 
 ---
 
@@ -46,12 +46,12 @@ pnpm preview   # ビルド結果をローカルで確認
 **Caddy は起動不要**です。Go だけ別ターミナルで動かしてください。
 
 ```bash
-cd backend && go run main.go   # 別ターミナル
-cd frontend && pnpm dev        # http://localhost:3000
+docker compose up -d db backend   # リポジトリルートで（DB + バックエンド）
+cd frontend && pnpm dev           # http://localhost:3000
 ```
 
+バックエンドは Docker 上の `air` が `.go` の保存を検知して自動で再起動します。
 フロントだけ触る日は `pnpm dev` のみでOKです（API呼び出しは失敗しますが画面は出ます）。
-DBを使う場合はリポジトリルートで `docker compose up -d db`。
 
 > `strictPort: true` を設定しているため、3000番が埋まっていると
 > **別ポートにずれず起動失敗します**。先客を止めてから起動してください。

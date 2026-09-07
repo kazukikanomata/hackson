@@ -1,3 +1,6 @@
 # go build の成果物
 backend
 *.exe
+
+# air の一時ビルド先
+tmp/
