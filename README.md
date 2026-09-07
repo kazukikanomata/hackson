@@ -13,11 +13,12 @@
 
 ## クイックスタート
 
-事前に **Go / Docker Desktop / nvm** をインストールしてください。
+事前に **Docker Desktop** と **nvm** をインストールしてください。
+バックエンドは Docker で動かすため、**Go のインストールは不要**です。
 
 ```bash
 # 環境変数の準備（初回のみ）
-cp .env.example .env       # 必要なら値を編集
+cp .env.example .env
 
 # フロントエンドの準備（初回のみ）
 cd frontend
@@ -26,28 +27,32 @@ corepack enable pnpm
 pnpm install
 cd ..
 
-# 起動（ターミナル3枚）
-docker compose up -d db        # 1. DB
-cd backend && go run main.go   # 2. バックエンド
-cd frontend && pnpm dev        # 3. フロントエンド
+# 起動（ターミナル2枚）
+docker compose up -d db backend   # 1. DB + バックエンド（コード変更は自動反映）
+cd frontend && pnpm dev           # 2. フロントエンド
 ```
 
 ブラウザで **http://localhost:3000** を開く。
-「Call Go API」ボタンが動けば全レイヤ疎通OK。
+「Call Go API」ボタンで `Hello, Go API!!` が表示されれば疎通OKです。
 
-停止するときは各ターミナルで `Ctrl+C`、DBは `docker compose down`。
+> 初回だけバックエンドの起動に1〜2分かかります（開発ツールの取得のため）。
+> 進捗は `docker compose logs -f backend` で確認できます。
+
+停止は `docker compose down` と、フロントエンドのターミナルで `Ctrl+C`。
 
 ## ドキュメント
 
 | ファイル | 内容 |
 | --- | --- |
-| [setup.md](setup.md) | 環境構築の詳細・起動パターン・Docker/ヘルスチェック |
+| [setup.md](setup.md) | 環境構築の詳細・起動パターン・ヘルスチェック・トラブルシューティング |
 | [frontend/Frontend.md](frontend/Frontend.md) | フロントエンドの開発ルール |
 | [backend/Backend.md](backend/Backend.md) | バックエンドの開発ルール |
 
-## 注意
+## 開発上の約束
 
 - パッケージマネージャは **pnpm** です。npm / yarn は使わないでください。
+- APIのパスは必ず `/api/` から始めてください（プロキシの振り分け条件）。
 - DBの認証情報は `.env` に置きます（git管理外）。**実際の値をコミットしないでください。**
   項目を増やしたら `.env.example` にも追記してください。
-- API のパスは必ず `/api/` から始めてください（プロキシの振り分け条件）。
+- `main` に直接 push しないでください。変更は feature branch から PR を出します
+  （ドキュメントの修正のみ例外）。

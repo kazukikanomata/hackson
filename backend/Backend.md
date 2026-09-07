@@ -9,26 +9,50 @@
 | DB             | PostgreSQL 16（Docker Compose で起動） |
 | 待ち受けポート | 8080                                   |
 
-Caddy が `/api/*` のリクエストをこのサーバ（8080）に転送します。
-フロントエンドからは `/api/hello` のような相対パスで到達します。
+Caddy が `/api/*` のリクエストをこのサーバ（8080）に転送します。フロントエンドからは `/api/hello` のような相対パスで到達します。
 
 ---
 
+## 構成
+
+Goのアプリケーションコードにおいて、ソースコードを更新するたびにソースをビルドし直して実行するという手間を省くため、ソースコードを更新し、保存したら自動でビルドと実行を行うために、airを用いる。
+
 ## セットアップ
+
+**Docker で動かす場合、Go のインストールは不要です。** コンテナ内の Go がビルドします。
+ネイティブで動かしたい場合のみインストールしてください。
 
 ```bash
 brew install go
 ```
 
-モジュールは初期化済みです（`go.mod`）。
+### Goのバージョン管理
+
+Node の `.nvmrc` + nvm に相当する仕組みは、**Go に標準で組み込まれています**。
+別途ツールを入れる必要はありません。`go.mod` の `toolchain` がそれです。
 
 ```
 module hackson/backend
 
-go 1.24.3
+go 1.24.3          ← 必要な最低バージョン
+toolchain go1.26.8 ← 実際に使うバージョン
 ```
 
-外部ライブラリを追加する場合:
+Go 1.21 以降は `GOTOOLCHAIN=auto`（既定値）が有効で、手元の Go が
+`toolchain` の指定より古い場合、**その版を自動でダウンロードして使います**。
+
+```bash
+cd backend && go version    # => go version go1.26.8 ...
+```
+
+手元の Go が新しい場合はダウングレードせず、そのまま新しい方が使われます。
+つまり **Go さえ入っていれば、チーム内でバージョンを手動で揃える必要はありません**。
+
+> `toolchain` の版を上げるときは `go get go@1.27.0` のように実行するか、
+> `go.mod` を直接編集します。Docker 側の `golang:1.26-alpine` も
+> 合わせて更新してください。
+
+### 外部ライブラリの追加
 
 ```bash
 go get github.com/example/lib   # 追加
@@ -48,7 +72,37 @@ cd backend
 go run main.go     # => Go server starting on :8080...
 ```
 
-フロント込みで通しで動かす手順はリポジトリルートの `setup.md` を参照。
+### 自動リロード（air）
+
+`go run main.go` は起動時に1回コンパイルするだけなので、**コードを変更しても
+再起動しないと反映されません**。`air` を使うと保存を検知して自動で再ビルド・
+再起動します。設定は `.air.toml` にあります。
+
+**方法1: Docker で動かす（Goのインストール不要）**
+
+```bash
+docker compose up -d db backend
+docker compose logs -f backend    # ビルドログを見る
+```
+
+ホストの `backend/` をコンテナにマウントしているので、**イメージの再ビルドは不要**です。
+保存すると約1秒で反映されます。8080番はホストに公開しているため、
+フロントエンドをネイティブで動かしていてもそのまま繋がります。
+
+**方法2: ネイティブで動かす**
+
+```bash
+go install github.com/air-verse/air@latest   # 初回のみ
+cd backend && air                            # go run main.go の代わり
+```
+
+> `air` は `$(go env GOPATH)/bin` に入ります。`air: command not found` になる場合は
+> PATH を通してください。
+> ```bash
+> export PATH="$PATH:$(go env GOPATH)/bin"
+> ```
+> なお `air` は Go 1.26 以上を要求しますが、`go.mod` の `toolchain go1.26.8` により
+> 自動で満たされるため、手元の Go を手動で更新する必要はありません。
 
 ### 開発時によく使うコマンド
 
@@ -92,26 +146,7 @@ http.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-**パスは必ず `/api/` から始めてください。** Caddy は `/api/*` だけを
-このサーバに転送し、それ以外はフロントエンド（3000）に流します。
-
-規模が大きくなったらハンドラをファイル分割し、必要ならルータ
-（`chi` など）の導入を検討します。
-
 ---
-
-## ヘルスチェックについて
-
-`/api/health` は Docker Compose のコンテナ死活監視から叩かれます。
-
-```yaml
-healthcheck:
-  test: ["CMD", "wget", "--spider", "-q", "http://localhost/api/health"]
-  interval: 5s
-  timeout: 3s
-  retries: 5
-  start_period: 5s
-```
 
 このエンドポイントが `unhealthy` になると、`depends_on` で待っている
 Caddy が起動しません。**認証を挟んだり重い処理を入れたりしないでください。**
@@ -119,21 +154,6 @@ Caddy が起動しません。**認証を挟んだり重い処理を入れたり
 DBとの接続確認まで含めたい場合は `db.PingContext()` の結果を返す形に拡張します。
 
 ---
-
-## DB接続（今後）
-
-接続情報はリポジトリルートの `.env` で管理しています（**git管理外**）。
-
-| 変数 | 用途 |
-| --- | --- |
-| `POSTGRES_USER` | DBユーザ名 |
-| `POSTGRES_PASSWORD` | DBパスワード |
-| `POSTGRES_DB` | DB名 |
-
-| 項目 | 値 |
-| --- | --- |
-| ホスト | `localhost`（ネイティブ実行） / `db`（コンテナ内） |
-| ポート | 5432 |
 
 ### Goから読む場合
 
@@ -162,11 +182,3 @@ go get github.com/joho/godotenv
 ドライバは `pgx` が標準的です（`go get github.com/jackc/pgx/v5`）。
 
 ---
-
-## 注意点
-
-- compose の `backend` サービスはまだ **nginx のダミー**です。
-  実物に差し替える際は Dockerfile が必要になります。
-- Go を `scratch` / `distroless` でビルドするとシェルが無いため、
-  `CMD-SHELL` 形式のヘルスチェックが使えません。`alpine` ベースにするか、
-  ヘルスチェック用の小さなバイナリを同梱してください。
