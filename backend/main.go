@@ -1,13 +1,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	dbpool, err := InitDB(ctx)
+	if err != nil {
+		log.Fatalf("エラー: %v", err)
+	}
+	defer dbpool.Close()
+
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+
+		if err := dbpool.PingContext(r.Context()); err != nil {
+			http.Error(w, `{"status": "db connection failed"}`, http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, `{"status": "ok"}`)
@@ -19,6 +36,5 @@ func main() {
 	})
 
 	fmt.Println("Go server starting on :8080...")
-	// エラーを握り潰すとポート競合時に無言で終了してしまうため必ず出力する
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

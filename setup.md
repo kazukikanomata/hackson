@@ -172,12 +172,13 @@ docker compose up -d      # 全サービス
 ### 停止
 
 ```bash
-docker compose down          # コンテナ削除（DBのデータも消えます）
-docker compose stop          # 停止のみ（データは残る）
+docker compose stop          # 停止のみ
+docker compose down          # コンテナ削除（DBのデータは残る）
+docker compose down -v       # コンテナ削除 + DBのデータも消す
 ```
 
-> compose に volume を定義していないため、`down` すると**DBのデータは消えます**。
-> 永続化が必要になったら `db` サービスに volume を追加してください。
+> `db-data` volume でデータを永続化しているため、`down` してもテーブルとレコードは残ります。
+> **`-v` を付けたときだけ消えます**（スキーマを作り直したいときに使う）。
 
 ---
 
@@ -208,6 +209,11 @@ docker compose ps          # STATUS 列が (healthy) になればOK
 - `timeout` — 1回のチェックのタイムアウト
 - `retries` — 連続何回失敗したら `unhealthy` にするか
 - `start_period` — 起動直後の猶予期間。この間の失敗は `retries` にカウントされない
+
+> `/api/health` は Go が DB に `Ping` した結果を返します（成功なら200、失敗なら500）。
+> そのため backend の healthcheck は「**Goが動いていて、かつDBまで繋がっているか**」を
+> まとめて見ていることになります。
+> DBを止めると backend も約35秒後に `unhealthy` になります（`retries: 10` × `interval: 5s`）。
 
 ### 個別に状態を見る
 
@@ -298,5 +304,4 @@ docker compose logs backend
 
 - compose の `frontend` サービスはまだ **nginx のダミー**です（`backend` は実物に差し替え済み）。
   フロントもDocker化する場合は、`backend` と同様にバインドマウント + `pnpm dev --host` の構成にします。
-- compose に volume が無いため、`docker compose down` でDBのデータが消えます。
 - OpenAPI からの型自動生成（`oapi-codegen` + `openapi-typescript`）は未着手です。
