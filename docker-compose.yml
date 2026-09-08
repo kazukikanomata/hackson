@@ -63,7 +63,8 @@ services:
       # ホストから直接叩けるようにする（フロントをネイティブで動かす場合に必要）
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      test:
+        ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -84,6 +85,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?.env に POSTGRES_DB を設定してください}
     ports:
       - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 3s
@@ -94,6 +97,7 @@ services:
       - app-net
 
 volumes:
+  db-data:
   go-path:
   go-build-cache:
 

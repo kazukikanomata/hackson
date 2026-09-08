@@ -17,6 +17,32 @@ Caddy が `/api/*` のリクエストをこのサーバ（8080）に転送しま
 
 Goのアプリケーションコードにおいて、ソースコードを更新するたびにソースをビルドし直して実行するという手間を省くため、ソースコードを更新し、保存したら自動でビルドと実行を行うために、airを用いる。
 
+## 原則
+
+Goのアプリケーションロジックは原則、標準ライブラリを用いる。外部ライブラリを使う時は例外的に検討する。
+
+### 例外: DBドライバ
+
+**Goの標準ライブラリにPostgresドライバは存在しません。** `database/sql` は
+ドライバを差し込むための共通インターフェースであり、実体は必ず外部パッケージになります。
+
+そのため以下の形で、外部依存をドライバ1つに封じ込めています。
+
+```go
+import (
+	"database/sql"                     // クエリ・トランザクションはこの標準APIで書く
+	_ "github.com/jackc/pgx/v5/stdlib" // ドライバ登録のみ。コードから直接呼ばない
+)
+
+db, err := sql.Open("pgx", dsn)
+```
+
+`_` import によりドライバは登録されるだけで、アプリケーションロジックからは
+一切参照しません。将来ドライバを差し替える場合も、この2行の変更で済みます。
+
+> `pgxpool` など pgx 独自のAPIを直接使うと、ロジックが特定ライブラリに
+> 密結合するため採用していません。
+
 ## セットアップ
 
 **Docker で動かす場合、Go のインストールは不要です。** コンテナ内の Go がビルドします。
@@ -98,9 +124,11 @@ cd backend && air                            # go run main.go の代わり
 
 > `air` は `$(go env GOPATH)/bin` に入ります。`air: command not found` になる場合は
 > PATH を通してください。
+>
 > ```bash
 > export PATH="$PATH:$(go env GOPATH)/bin"
 > ```
+>
 > なお `air` は Go 1.26 以上を要求しますが、`go.mod` の `toolchain go1.26.8` により
 > 自動で満たされるため、手元の Go を手動で更新する必要はありません。
 
@@ -129,10 +157,15 @@ curl http://localhost:8080/api/health   # => {"status": "ok"}
 
 ## エンドポイント
 
-| パス              | 用途               | レスポンス                       |
-| ----------------- | ------------------ | -------------------------------- |
-| `GET /api/health` | ヘルスチェック     | `{"status": "ok"}`               |
-| `GET /api/hello`  | 疎通確認用サンプル | `{"message": "Hello, Go API!!"}` |
+| パス              | 用途                     | レスポンス                              |
+| ----------------- | ------------------------ | --------------------------------------- |
+| `GET /api/health` | ヘルスチェック（DB疎通） | 200 `{"status": "ok"}`                  |
+|                   | DB接続失敗時             | 500 `{"status": "db connection failed"}` |
+| `GET /api/hello`  | 疎通確認用サンプル       | 200 `{"message": "Hello, Go API!!"}`    |
+
+`/api/health` は `db.PingContext()` の結果を返します。DBが停止していると500になり、
+compose の healthcheck が `unhealthy` を検知します。DBが復帰すればプールが自動で
+接続を張り直すため、**アプリの再起動は不要**です。
 
 ### ハンドラの追加方法
 
@@ -146,16 +179,59 @@ http.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
+**パスは必ず `/api/` から始めてください。** プロキシは `/api/*` だけを
+このサーバに転送し、それ以外はフロントエンド（3000）に流します。
+
 ---
+
+## ヘルスチェックについて
+
+`/api/health` は Docker Compose のコンテナ死活監視から叩かれます。
+
+```yaml
+healthcheck:
+  test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+  start_period: 120s
+```
 
 このエンドポイントが `unhealthy` になると、`depends_on` で待っている
 Caddy が起動しません。**認証を挟んだり重い処理を入れたりしないでください。**
 
-DBとの接続確認まで含めたい場合は `db.PingContext()` の結果を返す形に拡張します。
-
 ---
 
-### Goから読む場合
+## DB接続
+
+`connection.go` の `InitDB()` で接続します。実装済みです。
+
+### 構成
+
+```go
+import (
+	"database/sql"                     // クエリ・トランザクションはこの標準APIで書く
+	_ "github.com/jackc/pgx/v5/stdlib" // ドライバ登録のみ。直接呼ばない
+)
+
+dbpool, err := sql.Open("pgx", dsn)
+```
+
+- `*sql.DB` は**起動時に1回だけ**作り、ハンドラで使い回す（リクエスト毎に作らない）
+- `defer dbpool.Close()` は `main` に置く（`InitDB` 内に置くと返す前に閉じてしまう）
+- 接続失敗時は `log.Fatal` で落とす（黙って起動させない）
+- DB復帰時はプールが自動で接続を張り直すため、アプリの再起動は不要
+
+### 接続情報
+
+リポジトリルートの `.env` で管理しています（**git管理外**）。
+
+| 変数 | 用途 |
+| --- | --- |
+| `POSTGRES_USER` | DBユーザ名 |
+| `POSTGRES_PASSWORD` | DBパスワード |
+| `POSTGRES_DB` | DB名 |
+| `DB_HOST` | 接続先ホスト（compose が `db` を渡す） |
 
 **ソースに直書きせず、必ず環境変数から読んでください。**
 
@@ -169,6 +245,10 @@ dsn := fmt.Sprintf(
 )
 ```
 
+> `?sslmode=disable` の `?` は**1つ**です。2つ書くと `?sslmode` という未知の
+> パラメータとして扱われ、`FATAL: unrecognized configuration parameter` で
+> 起動できません（エラーメッセージが分かりにくいので注意）。
+
 ネイティブ実行時は `.env` が自動で読まれないため、以下のいずれかで渡します。
 
 ```bash
@@ -179,6 +259,14 @@ set -a && source ../.env && set +a && go run main.go
 go get github.com/joho/godotenv
 ```
 
-ドライバは `pgx` が標準的です（`go get github.com/jackc/pgx/v5`）。
-
 ---
+
+## 注意点
+
+- compose の `backend` は本物の Go に差し替え済みですが、**開発専用の構成**です
+  （`golang:1.26-alpine` + バインドマウント + air）。本番デプロイには別途
+  マルチステージビルドの Dockerfile が必要です。
+- Go を `scratch` / `distroless` でビルドするとシェルが無いため、
+  `CMD-SHELL` 形式のヘルスチェックが使えません。`alpine` ベースにするか、
+  ヘルスチェック用の小さなバイナリを同梱してください。
+- テーブル定義（マイグレーション）の方針は未決です。
